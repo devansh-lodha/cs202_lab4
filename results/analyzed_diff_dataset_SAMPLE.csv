@@ -1,0 +1,1001 @@
+repo_name,commit_sha,parent_commit_sha,old_file_path,new_file_path,diff_myers,diff_hist,Discrepancy,file_type,preferred_algorithm,hunks_myers,hunks_hist,lines_myers,lines_hist
+pandas,7bfef3b1cba58a6c3aa62493e0b0905bc59e6443,6e08c29a8fd5d69ed3efe0b0f0b6cd0ad111d81e,doc/source/whatsnew/v3.0.0.rst,doc/source/whatsnew/v3.0.0.rst,"@@ -945,6 +945,7 @@ Indexing
+ - Bug in :meth:`Series.__setitem__` when assigning boolean series with boolean indexer will raise ``LossySetitemError`` (:issue:`57338`)
+ - Bug in printing :attr:`Index.names` and :attr:`MultiIndex.levels` would not escape single quotes (:issue:`60190`)
+ - Bug in reindexing of :class:`DataFrame` with :class:`PeriodDtype` columns in case of consolidated block (:issue:`60980`, :issue:`60273`)
++- Bug in :meth:`Index.__getitem__` incorrectly raising with a 0-dim ``np.ndarray`` key (:issue:`55601`)
+ 
+ Missing
+ ^^^^^^^
+","@@ -945,6 +945,7 @@ Indexing
+ - Bug in :meth:`Series.__setitem__` when assigning boolean series with boolean indexer will raise ``LossySetitemError`` (:issue:`57338`)
+ - Bug in printing :attr:`Index.names` and :attr:`MultiIndex.levels` would not escape single quotes (:issue:`60190`)
+ - Bug in reindexing of :class:`DataFrame` with :class:`PeriodDtype` columns in case of consolidated block (:issue:`60980`, :issue:`60273`)
++- Bug in :meth:`Index.__getitem__` incorrectly raising with a 0-dim ``np.ndarray`` key (:issue:`55601`)
+ 
+ Missing
+ ^^^^^^^
+",No,Other,N/A,,,,
+pandas,7bfef3b1cba58a6c3aa62493e0b0905bc59e6443,6e08c29a8fd5d69ed3efe0b0f0b6cd0ad111d81e,pandas/core/indexes/base.py,pandas/core/indexes/base.py,"@@ -5219,6 +5219,7 @@ class Index(IndexOpsMixin, PandasObject):
+         """"""
+         getitem = self._data.__getitem__
+ 
++        key = lib.item_from_zerodim(key)
+         if is_integer(key) or is_float(key):
+             # GH#44051 exclude bool, which would return a 2d ndarray
+             key = com.cast_scalar_indexer(key)
+","@@ -5219,6 +5219,7 @@ class Index(IndexOpsMixin, PandasObject):
+         """"""
+         getitem = self._data.__getitem__
+ 
++        key = lib.item_from_zerodim(key)
+         if is_integer(key) or is_float(key):
+             # GH#44051 exclude bool, which would return a 2d ndarray
+             key = com.cast_scalar_indexer(key)
+",No,Source Code,N/A,,,,
+pandas,7bfef3b1cba58a6c3aa62493e0b0905bc59e6443,6e08c29a8fd5d69ed3efe0b0f0b6cd0ad111d81e,pandas/core/indexes/multi.py,pandas/core/indexes/multi.py,"@@ -2235,6 +2235,7 @@ class MultiIndex(Index):
+     # --------------------------------------------------------------------
+ 
+     def __getitem__(self, key):
++        key = lib.item_from_zerodim(key)
+         if is_scalar(key):
+             key = com.cast_scalar_indexer(key)
+ 
+","@@ -2235,6 +2235,7 @@ class MultiIndex(Index):
+     # --------------------------------------------------------------------
+ 
+     def __getitem__(self, key):
++        key = lib.item_from_zerodim(key)
+         if is_scalar(key):
+             key = com.cast_scalar_indexer(key)
+ 
+",No,Source Code,N/A,,,,
+pandas,7bfef3b1cba58a6c3aa62493e0b0905bc59e6443,6e08c29a8fd5d69ed3efe0b0f0b6cd0ad111d81e,pandas/core/indexes/range.py,pandas/core/indexes/range.py,"@@ -1175,6 +1175,7 @@ class RangeIndex(Index):
+         """"""
+         Conserve RangeIndex type for scalar and slice keys.
+         """"""
++        key = lib.item_from_zerodim(key)
+         if key is Ellipsis:
+             key = slice(None)
+         if isinstance(key, slice):
+","@@ -1175,6 +1175,7 @@ class RangeIndex(Index):
+         """"""
+         Conserve RangeIndex type for scalar and slice keys.
+         """"""
++        key = lib.item_from_zerodim(key)
+         if key is Ellipsis:
+             key = slice(None)
+         if isinstance(key, slice):
+",No,Source Code,N/A,,,,
+pandas,7bfef3b1cba58a6c3aa62493e0b0905bc59e6443,6e08c29a8fd5d69ed3efe0b0f0b6cd0ad111d81e,pandas/tests/indexes/test_any_index.py,pandas/tests/indexes/test_any_index.py,"@@ -117,6 +117,15 @@ class TestRoundTrips:
+ 
+ 
+ class TestIndexing:
++    def test_getitem_0d_ndarray(self, index):
++        # GH#55601
++        if len(index) == 0:
++            pytest.skip(reason=""Test assumes non-empty index"")
++        key = np.array(0)
++        result = index[key]
++
++        assert result == index[0]
++
+     def test_get_loc_listlike_raises_invalid_index_error(self, index):
+         # and never TypeError
+         key = np.array([0, 1], dtype=np.intp)
+","@@ -117,6 +117,15 @@ class TestRoundTrips:
+ 
+ 
+ class TestIndexing:
++    def test_getitem_0d_ndarray(self, index):
++        # GH#55601
++        if len(index) == 0:
++            pytest.skip(reason=""Test assumes non-empty index"")
++        key = np.array(0)
++        result = index[key]
++
++        assert result == index[0]
++
+     def test_get_loc_listlike_raises_invalid_index_error(self, index):
+         # and never TypeError
+         key = np.array([0, 1], dtype=np.intp)
+",No,Test Code,N/A,,,,
+pandas,6e08c29a8fd5d69ed3efe0b0f0b6cd0ad111d81e,3e1d6d5bc853bd8bc983291b12aec2dbf477dde6,pandas/core/missing.py,pandas/core/missing.py,"@@ -45,8 +45,12 @@ from pandas.core.dtypes.missing import (
+ )
+ 
+ if TYPE_CHECKING:
++    from typing import TypeAlias
++
+     from pandas import Index
+ 
++    _CubicBC: TypeAlias = Literal[""not-a-knot"", ""clamped"", ""natural"", ""periodic""]
++
+ 
+ def check_value_size(value, mask: npt.NDArray[np.bool_], length: int):
+     """"""
+@@ -652,7 +656,7 @@ def _akima_interpolate(
+     xi: np.ndarray,
+     yi: np.ndarray,
+     x: np.ndarray,
+-    der: int | list[int] | None = 0,
++    der: int = 0,
+     axis: AxisInt = 0,
+ ):
+     """"""
+@@ -673,10 +677,8 @@ def _akima_interpolate(
+     x : np.ndarray
+         Of length M.
+     der : int, optional
+-        How many derivatives to extract; None for all potentially
+-        nonzero derivatives (that is a number equal to the number
+-        of points), or a list of derivatives to extract. This number
+-        includes the function value as 0th derivative.
++        How many derivatives to extract. This number includes the function
++        value as 0th derivative.
+     axis : int, optional
+         Axis in the yi array corresponding to the x-coordinate values.
+ 
+@@ -702,9 +704,9 @@ def _cubicspline_interpolate(
+     yi: np.ndarray,
+     x: np.ndarray,
+     axis: AxisInt = 0,
+-    bc_type: str | tuple[Any, Any] = ""not-a-knot"",
+-    extrapolate=None,
+-):
++    bc_type: _CubicBC | tuple[Any, Any] = ""not-a-knot"",
++    extrapolate: Literal[""periodic""] | bool | None = None,
++) -> np.ndarray:
+     """"""
+     Convenience function for cubic spline data interpolator.
+ 
+","@@ -45,8 +45,12 @@ from pandas.core.dtypes.missing import (
+ )
+ 
+ if TYPE_CHECKING:
++    from typing import TypeAlias
++
+     from pandas import Index
+ 
++    _CubicBC: TypeAlias = Literal[""not-a-knot"", ""clamped"", ""natural"", ""periodic""]
++
+ 
+ def check_value_size(value, mask: npt.NDArray[np.bool_], length: int):
+     """"""
+@@ -652,7 +656,7 @@ def _akima_interpolate(
+     xi: np.ndarray,
+     yi: np.ndarray,
+     x: np.ndarray,
+-    der: int | list[int] | None = 0,
++    der: int = 0,
+     axis: AxisInt = 0,
+ ):
+     """"""
+@@ -673,10 +677,8 @@ def _akima_interpolate(
+     x : np.ndarray
+         Of length M.
+     der : int, optional
+-        How many derivatives to extract; None for all potentially
+-        nonzero derivatives (that is a number equal to the number
+-        of points), or a list of derivatives to extract. This number
+-        includes the function value as 0th derivative.
++        How many derivatives to extract. This number includes the function
++        value as 0th derivative.
+     axis : int, optional
+         Axis in the yi array corresponding to the x-coordinate values.
+ 
+@@ -702,9 +704,9 @@ def _cubicspline_interpolate(
+     yi: np.ndarray,
+     x: np.ndarray,
+     axis: AxisInt = 0,
+-    bc_type: str | tuple[Any, Any] = ""not-a-knot"",
+-    extrapolate=None,
+-):
++    bc_type: _CubicBC | tuple[Any, Any] = ""not-a-knot"",
++    extrapolate: Literal[""periodic""] | bool | None = None,
++) -> np.ndarray:
+     """"""
+     Convenience function for cubic spline data interpolator.
+ 
+",No,Source Code,N/A,,,,
+pandas,3e1d6d5bc853bd8bc983291b12aec2dbf477dde6,0e217774782b1bf22039ee81fe7bfea7efb6df89,pandas/core/construction.py,pandas/core/construction.py,"@@ -31,7 +31,6 @@ from pandas.core.dtypes.cast import (
+     maybe_cast_to_datetime,
+     maybe_cast_to_integer_array,
+     maybe_convert_platform,
+-    maybe_infer_to_datetimelike,
+     maybe_promote,
+ )
+ from pandas.core.dtypes.common import (
+@@ -612,7 +611,15 @@ def sanitize_array(
+         if dtype is None:
+             subarr = data
+             if data.dtype == object and infer_object:
+-                subarr = maybe_infer_to_datetimelike(data)
++                subarr = lib.maybe_convert_objects(
++                    data,
++                    # Here we do not convert numeric dtypes, as if we wanted that,
++                    #  numpy would have done it for us.
++                    convert_numeric=False,
++                    convert_non_numeric=True,
++                    convert_to_nullable_dtype=False,
++                    dtype_if_all_nat=np.dtype(""M8[s]""),
++                )
+             elif data.dtype.kind == ""U"" and using_string_dtype():
+                 from pandas.core.arrays.string_ import StringDtype
+ 
+@@ -659,7 +666,15 @@ def sanitize_array(
+             subarr = maybe_convert_platform(data)
+             if subarr.dtype == object:
+                 subarr = cast(np.ndarray, subarr)
+-                subarr = maybe_infer_to_datetimelike(subarr)
++                subarr = lib.maybe_convert_objects(
++                    subarr,
++                    # Here we do not convert numeric dtypes, as if we wanted that,
++                    #  numpy would have done it for us.
++                    convert_numeric=False,
++                    convert_non_numeric=True,
++                    convert_to_nullable_dtype=False,
++                    dtype_if_all_nat=np.dtype(""M8[s]""),
++                )
+ 
+     subarr = _sanitize_ndim(subarr, data, dtype, index, allow_2d=allow_2d)
+ 
+","@@ -31,7 +31,6 @@ from pandas.core.dtypes.cast import (
+     maybe_cast_to_datetime,
+     maybe_cast_to_integer_array,
+     maybe_convert_platform,
+-    maybe_infer_to_datetimelike,
+     maybe_promote,
+ )
+ from pandas.core.dtypes.common import (
+@@ -612,7 +611,15 @@ def sanitize_array(
+         if dtype is None:
+             subarr = data
+             if data.dtype == object and infer_object:
+-                subarr = maybe_infer_to_datetimelike(data)
++                subarr = lib.maybe_convert_objects(
++                    data,
++                    # Here we do not convert numeric dtypes, as if we wanted that,
++                    #  numpy would have done it for us.
++                    convert_numeric=False,
++                    convert_non_numeric=True,
++                    convert_to_nullable_dtype=False,
++                    dtype_if_all_nat=np.dtype(""M8[s]""),
++                )
+             elif data.dtype.kind == ""U"" and using_string_dtype():
+                 from pandas.core.arrays.string_ import StringDtype
+ 
+@@ -659,7 +666,15 @@ def sanitize_array(
+             subarr = maybe_convert_platform(data)
+             if subarr.dtype == object:
+                 subarr = cast(np.ndarray, subarr)
+-                subarr = maybe_infer_to_datetimelike(subarr)
++                subarr = lib.maybe_convert_objects(
++                    subarr,
++                    # Here we do not convert numeric dtypes, as if we wanted that,
++                    #  numpy would have done it for us.
++                    convert_numeric=False,
++                    convert_non_numeric=True,
++                    convert_to_nullable_dtype=False,
++                    dtype_if_all_nat=np.dtype(""M8[s]""),
++                )
+ 
+     subarr = _sanitize_ndim(subarr, data, dtype, index, allow_2d=allow_2d)
+ 
+",No,Source Code,N/A,,,,
+pandas,3e1d6d5bc853bd8bc983291b12aec2dbf477dde6,0e217774782b1bf22039ee81fe7bfea7efb6df89,pandas/core/dtypes/cast.py,pandas/core/dtypes/cast.py,"@@ -97,7 +97,6 @@ if TYPE_CHECKING:
+         DtypeObj,
+         NumpyIndexT,
+         Scalar,
+-        npt,
+     )
+ 
+     from pandas import Index
+@@ -1058,51 +1057,6 @@ def convert_dtypes(
+     return inferred_dtype  # type: ignore[return-value]
+ 
+ 
+-def maybe_infer_to_datetimelike(
+-    value: npt.NDArray[np.object_],
+-    convert_to_nullable_dtype: bool = False,
+-) -> np.ndarray | DatetimeArray | TimedeltaArray | PeriodArray | IntervalArray:
+-    """"""
+-    we might have a array (or single object) that is datetime like,
+-    and no dtype is passed don't change the value unless we find a
+-    datetime/timedelta set
+-
+-    this is pretty strict in that a datetime/timedelta is REQUIRED
+-    in addition to possible nulls/string likes
+-
+-    Parameters
+-    ----------
+-    value : np.ndarray[object]
+-
+-    Returns
+-    -------
+-    np.ndarray, DatetimeArray, TimedeltaArray, PeriodArray, or IntervalArray
+-
+-    """"""
+-    if not isinstance(value, np.ndarray) or value.dtype != object:
+-        # Caller is responsible for passing only ndarray[object]
+-        raise TypeError(type(value))  # pragma: no cover
+-    if value.ndim != 1:
+-        # Caller is responsible
+-        raise ValueError(value.ndim)  # pragma: no cover
+-
+-    if not len(value):
+-        return value
+-
+-    # error: Incompatible return value type (got ""Union[ExtensionArray,
+-    # ndarray[Any, Any]]"", expected ""Union[ndarray[Any, Any], DatetimeArray,
+-    # TimedeltaArray, PeriodArray, IntervalArray]"")
+-    return lib.maybe_convert_objects(  # type: ignore[return-value]
+-        value,
+-        # Here we do not convert numeric dtypes, as if we wanted that,
+-        #  numpy would have done it for us.
+-        convert_numeric=False,
+-        convert_non_numeric=True,
+-        convert_to_nullable_dtype=convert_to_nullable_dtype,
+-        dtype_if_all_nat=np.dtype(""M8[s]""),
+-    )
+-
+-
+ def maybe_cast_to_datetime(
+     value: np.ndarray | list, dtype: np.dtype
+ ) -> DatetimeArray | TimedeltaArray | np.ndarray:
+","@@ -97,7 +97,6 @@ if TYPE_CHECKING:
+         DtypeObj,
+         NumpyIndexT,
+         Scalar,
+-        npt,
+     )
+ 
+     from pandas import Index
+@@ -1058,51 +1057,6 @@ def convert_dtypes(
+     return inferred_dtype  # type: ignore[return-value]
+ 
+ 
+-def maybe_infer_to_datetimelike(
+-    value: npt.NDArray[np.object_],
+-    convert_to_nullable_dtype: bool = False,
+-) -> np.ndarray | DatetimeArray | TimedeltaArray | PeriodArray | IntervalArray:
+-    """"""
+-    we might have a array (or single object) that is datetime like,
+-    and no dtype is passed don't change the value unless we find a
+-    datetime/timedelta set
+-
+-    this is pretty strict in that a datetime/timedelta is REQUIRED
+-    in addition to possible nulls/string likes
+-
+-    Parameters
+-    ----------
+-    value : np.ndarray[object]
+-
+-    Returns
+-    -------
+-    np.ndarray, DatetimeArray, TimedeltaArray, PeriodArray, or IntervalArray
+-
+-    """"""
+-    if not isinstance(value, np.ndarray) or value.dtype != object:
+-        # Caller is responsible for passing only ndarray[object]
+-        raise TypeError(type(value))  # pragma: no cover
+-    if value.ndim != 1:
+-        # Caller is responsible
+-        raise ValueError(value.ndim)  # pragma: no cover
+-
+-    if not len(value):
+-        return value
+-
+-    # error: Incompatible return value type (got ""Union[ExtensionArray,
+-    # ndarray[Any, Any]]"", expected ""Union[ndarray[Any, Any], DatetimeArray,
+-    # TimedeltaArray, PeriodArray, IntervalArray]"")
+-    return lib.maybe_convert_objects(  # type: ignore[return-value]
+-        value,
+-        # Here we do not convert numeric dtypes, as if we wanted that,
+-        #  numpy would have done it for us.
+-        convert_numeric=False,
+-        convert_non_numeric=True,
+-        convert_to_nullable_dtype=convert_to_nullable_dtype,
+-        dtype_if_all_nat=np.dtype(""M8[s]""),
+-    )
+-
+-
+ def maybe_cast_to_datetime(
+     value: np.ndarray | list, dtype: np.dtype
+ ) -> DatetimeArray | TimedeltaArray | np.ndarray:
+",No,Source Code,N/A,,,,
+pandas,3e1d6d5bc853bd8bc983291b12aec2dbf477dde6,0e217774782b1bf22039ee81fe7bfea7efb6df89,pandas/core/internals/construction.py,pandas/core/internals/construction.py,"@@ -24,7 +24,6 @@ from pandas.core.dtypes.cast import (
+     dict_compat,
+     maybe_cast_to_datetime,
+     maybe_convert_platform,
+-    maybe_infer_to_datetimelike,
+ )
+ from pandas.core.dtypes.common import (
+     is_1d_only_ea_dtype,
+@@ -290,7 +289,18 @@ def ndarray_to_mgr(
+     # embedded in an object type
+     if dtype is None and infer_object and is_object_dtype(values.dtype):
+         obj_columns = list(values)
+-        maybe_datetime = [maybe_infer_to_datetimelike(x) for x in obj_columns]
++        maybe_datetime = [
++            lib.maybe_convert_objects(
++                x,
++                # Here we do not convert numeric dtypes, as if we wanted that,
++                #  numpy would have done it for us.
++                convert_numeric=False,
++                convert_non_numeric=True,
++                convert_to_nullable_dtype=False,
++                dtype_if_all_nat=np.dtype(""M8[s]""),
++            )
++            for x in obj_columns
++        ]
+         # don't convert (and copy) the objects if no type inference occurs
+         if any(x is not y for x, y in zip(obj_columns, maybe_datetime)):
+             block_values = [
+@@ -485,7 +495,7 @@ def _prep_ndarraylike(values, copy: bool = True) -> np.ndarray:
+ 
+         v = extract_array(v, extract_numpy=True)
+         res = maybe_convert_platform(v)
+-        # We don't do maybe_infer_to_datetimelike here bc we will end up doing
++        # We don't do maybe_infer_objects here bc we will end up doing
+         #  it column-by-column in ndarray_to_mgr
+         return res
+ 
+@@ -965,7 +975,15 @@ def convert_object_array(
+                 if arr.dtype == np.dtype(""O""):
+                     # i.e. maybe_convert_objects didn't convert
+                     convert_to_nullable_dtype = dtype_backend != ""numpy""
+-                    arr = maybe_infer_to_datetimelike(arr, convert_to_nullable_dtype)
++                    arr = lib.maybe_convert_objects(
++                        arr,
++                        # Here we do not convert numeric dtypes, as if we wanted that,
++                        #  numpy would have done it for us.
++                        convert_numeric=False,
++                        convert_non_numeric=True,
++                        convert_to_nullable_dtype=convert_to_nullable_dtype,
++                        dtype_if_all_nat=np.dtype(""M8[s]""),
++                    )
+                     if convert_to_nullable_dtype and arr.dtype == np.dtype(""O""):
+                         new_dtype = StringDtype()
+                         arr_cls = new_dtype.construct_array_type()
+","@@ -24,7 +24,6 @@ from pandas.core.dtypes.cast import (
+     dict_compat,
+     maybe_cast_to_datetime,
+     maybe_convert_platform,
+-    maybe_infer_to_datetimelike,
+ )
+ from pandas.core.dtypes.common import (
+     is_1d_only_ea_dtype,
+@@ -290,7 +289,18 @@ def ndarray_to_mgr(
+     # embedded in an object type
+     if dtype is None and infer_object and is_object_dtype(values.dtype):
+         obj_columns = list(values)
+-        maybe_datetime = [maybe_infer_to_datetimelike(x) for x in obj_columns]
++        maybe_datetime = [
++            lib.maybe_convert_objects(
++                x,
++                # Here we do not convert numeric dtypes, as if we wanted that,
++                #  numpy would have done it for us.
++                convert_numeric=False,
++                convert_non_numeric=True,
++                convert_to_nullable_dtype=False,
++                dtype_if_all_nat=np.dtype(""M8[s]""),
++            )
++            for x in obj_columns
++        ]
+         # don't convert (and copy) the objects if no type inference occurs
+         if any(x is not y for x, y in zip(obj_columns, maybe_datetime)):
+             block_values = [
+@@ -485,7 +495,7 @@ def _prep_ndarraylike(values, copy: bool = True) -> np.ndarray:
+ 
+         v = extract_array(v, extract_numpy=True)
+         res = maybe_convert_platform(v)
+-        # We don't do maybe_infer_to_datetimelike here bc we will end up doing
++        # We don't do maybe_infer_objects here bc we will end up doing
+         #  it column-by-column in ndarray_to_mgr
+         return res
+ 
+@@ -965,7 +975,15 @@ def convert_object_array(
+                 if arr.dtype == np.dtype(""O""):
+                     # i.e. maybe_convert_objects didn't convert
+                     convert_to_nullable_dtype = dtype_backend != ""numpy""
+-                    arr = maybe_infer_to_datetimelike(arr, convert_to_nullable_dtype)
++                    arr = lib.maybe_convert_objects(
++                        arr,
++                        # Here we do not convert numeric dtypes, as if we wanted that,
++                        #  numpy would have done it for us.
++                        convert_numeric=False,
++                        convert_non_numeric=True,
++                        convert_to_nullable_dtype=convert_to_nullable_dtype,
++                        dtype_if_all_nat=np.dtype(""M8[s]""),
++                    )
+                     if convert_to_nullable_dtype and arr.dtype == np.dtype(""O""):
+                         new_dtype = StringDtype()
+                         arr_cls = new_dtype.construct_array_type()
+",No,Source Code,N/A,,,,
+pandas,0e217774782b1bf22039ee81fe7bfea7efb6df89,49d1d7501f3c7bc60c191ee3e6151c98d8164937,pandas/_libs/src/datetime/pd_datetime.c,pandas/_libs/src/datetime/pd_datetime.c,"@@ -55,9 +55,23 @@ static int convert_pydatetime_to_datetimestruct(PyObject *dtobj,
+   out->month = 1;
+   out->day = 1;
+ 
+-  out->year = PyLong_AsLong(PyObject_GetAttrString(obj, ""year""));
+-  out->month = PyLong_AsLong(PyObject_GetAttrString(obj, ""month""));
+-  out->day = PyLong_AsLong(PyObject_GetAttrString(obj, ""day""));
++  tmp = PyObject_GetAttrString(obj, ""year"");
++  if (tmp == NULL)
++    return -1;
++  out->year = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""month"");
++  if (tmp == NULL)
++    return -1;
++  out->month = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""day"");
++  if (tmp == NULL)
++    return -1;
++  out->day = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
+ 
+   // TODO(anyone): If we can get PyDateTime_IMPORT to work, we could use
+   // PyDateTime_Check here, and less verbose attribute lookups.
+@@ -70,10 +84,29 @@ static int convert_pydatetime_to_datetimestruct(PyObject *dtobj,
+     return 0;
+   }
+ 
+-  out->hour = PyLong_AsLong(PyObject_GetAttrString(obj, ""hour""));
+-  out->min = PyLong_AsLong(PyObject_GetAttrString(obj, ""minute""));
+-  out->sec = PyLong_AsLong(PyObject_GetAttrString(obj, ""second""));
+-  out->us = PyLong_AsLong(PyObject_GetAttrString(obj, ""microsecond""));
++  tmp = PyObject_GetAttrString(obj, ""hour"");
++  if (tmp == NULL)
++    return -1;
++  out->hour = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""minute"");
++  if (tmp == NULL)
++    return -1;
++  out->min = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""second"");
++  if (tmp == NULL)
++    return -1;
++  out->sec = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""microsecond"");
++  if (tmp == NULL)
++    return -1;
++  out->us = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
+ 
+   if (PyObject_HasAttrString(obj, ""tzinfo"")) {
+     PyObject *offset = extract_utc_offset(obj);
+","@@ -55,9 +55,23 @@ static int convert_pydatetime_to_datetimestruct(PyObject *dtobj,
+   out->month = 1;
+   out->day = 1;
+ 
+-  out->year = PyLong_AsLong(PyObject_GetAttrString(obj, ""year""));
+-  out->month = PyLong_AsLong(PyObject_GetAttrString(obj, ""month""));
+-  out->day = PyLong_AsLong(PyObject_GetAttrString(obj, ""day""));
++  tmp = PyObject_GetAttrString(obj, ""year"");
++  if (tmp == NULL)
++    return -1;
++  out->year = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""month"");
++  if (tmp == NULL)
++    return -1;
++  out->month = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""day"");
++  if (tmp == NULL)
++    return -1;
++  out->day = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
+ 
+   // TODO(anyone): If we can get PyDateTime_IMPORT to work, we could use
+   // PyDateTime_Check here, and less verbose attribute lookups.
+@@ -70,10 +84,29 @@ static int convert_pydatetime_to_datetimestruct(PyObject *dtobj,
+     return 0;
+   }
+ 
+-  out->hour = PyLong_AsLong(PyObject_GetAttrString(obj, ""hour""));
+-  out->min = PyLong_AsLong(PyObject_GetAttrString(obj, ""minute""));
+-  out->sec = PyLong_AsLong(PyObject_GetAttrString(obj, ""second""));
+-  out->us = PyLong_AsLong(PyObject_GetAttrString(obj, ""microsecond""));
++  tmp = PyObject_GetAttrString(obj, ""hour"");
++  if (tmp == NULL)
++    return -1;
++  out->hour = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""minute"");
++  if (tmp == NULL)
++    return -1;
++  out->min = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""second"");
++  if (tmp == NULL)
++    return -1;
++  out->sec = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
++
++  tmp = PyObject_GetAttrString(obj, ""microsecond"");
++  if (tmp == NULL)
++    return -1;
++  out->us = PyLong_AsLong(tmp);
++  Py_DECREF(tmp);
+ 
+   if (PyObject_HasAttrString(obj, ""tzinfo"")) {
+     PyObject *offset = extract_utc_offset(obj);
+",No,Other,N/A,,,,
+pandas,49d1d7501f3c7bc60c191ee3e6151c98d8164937,4088ec2b5e554e849cfdd571d16511c3a335e845,pandas/tests/io/data/html/banklist.html,pandas/tests/io/data/html/banklist.html,"@@ -18,90 +18,6 @@
+ </head>
+ <body>
+ 
+-<!-- START of Header -->
+-<script type=""text/javascript"" src=""/responsive/header/js/header.js""></script>
+-<link rel=""stylesheet"" type=""text/css"" href=""/responsive/header/css/header.css"" />
+-<!-- googleac.html includes Autocomplete functionality -->
+-<!-- Autocomplete files -->
+-<link rel=""stylesheet"" type=""text/css"" href=""/responsive/header/css/jquery.autocomplete.css"" />
+-<script type=""text/javascript"" src=""/responsive/js/jquery-1.4.1.min.js""></script>
+-<script type=""text/javascript"" src=""/responsive/header/js/jquery.autocomplete-1.4.2.js""></script>
+-<script type=""text/javascript"">
+-function findValue(li) {
+-	if( li == null ) return alert(""No match!"");
+-
+-	// if coming from an AJAX call, let's use the Id as the value
+-	if( !!li.extra ) var sValue = li.extra[0];
+-
+-	// otherwise, let's just display the value in the text box
+-	else var sValue = li.selectValue;
+-
+-	$('#googlesearch').submit();
+-
+-}
+-function findValue2(li) {
+-	if( li == null ) return alert(""No match!"");
+-
+-	// if coming from an AJAX call, let's use the Id as the value
+-	if( !!li.extra ) var sValue = li.extra[0];
+-
+-	// otherwise, let's just display the value in the text box
+-	else var sValue = li.selectValue;
+-
+-	$('#googlesearch2').submit();
+-}
+-function selectItem(li) {
+-	findValue(li);
+-}
+-function selectItem2(li) {
+-	findValue2(li);
+-}
+-
+-$().ready(function() {
+-
+-	function log(event, data, formatted) {
+-		$(""<li>"").html( !data ? ""No match!"" : ""Selected: "" + formatted).appendTo(""#result"");
+-	}
+-
+-	function formatItem(row) {
+-		return row[0] + "" (<strong>id: "" + row[1] + ""</strong>)"";
+-	}
+-	function formatResult(row) {
+-		return row[0].replace(/(<.+?>)/gi, '');
+-	}
+-
+-	$(""#newSearch"").autocomplete(""/searchjs.asp"", {
+-		width: 179,
+-		autoFill: false,
+-		//delay:10,
+-		minChars:2,
+-		cacheLength: 10,
+-		onFindValue:findValue,
+-		onItemSelect: selectItem,
+-		selectFirst: false
+-
+-	});
+-
+-	$(""#search2"").autocomplete(""/searchjs.asp"", {
+-		width: 160,
+-		autoFill: false,
+-		//delay:10,
+-		minChars:2,
+-		cacheLength: 10,
+-		onFindValue:findValue2,
+-		onItemSelect: selectItem2,
+-		selectFirst: false
+-
+-	});
+-
+-});
+-
+-</script>
+-<!-- END CODE NEEDED TO MAKE THE SEARCH BOX WORK -->
+-
+-<!-- FORESEE Code -->
+-<script type=""text/javascript"" src=""/foresee/foresee-trigger.js""></script>
+-
+ <a href=""#after_header"" class=""responsive_header-skip_header"">Skip Header</a>
+ <header>
+ <div id=""responsive_header"">
+@@ -322,195 +238,6 @@ prepare_responsive_header_nav();
+ 				<td class=""closing"">April 19, 2013</td>
+ 				<td class=""updated"">May 16, 2013</td>
+ 			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""heritagebank-fl.html"">Heritage Bank of North Florida</a></td>
+-				<td class=""city"">Orange Park</td>
+-				<td class=""state"">FL</td>
+-				<td class=""cert"">26680</td>
+-				<td class=""ai"">FirstAtlantic Bank</td>
+-				<td class=""closing"">April 19, 2013</td>
+-				<td class=""updated"">May 16, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""firstfederal-ky.html"">First Federal Bank</a></td>
+-				<td class=""city"">Lexington</td>
+-				<td class=""state"">KY</td>
+-				<td class=""cert"">29594</td>
+-				<td class=""ai"">Your Community Bank</td>
+-				<td class=""closing"">April 19, 2013</td>
+-				<td class=""updated"">April 23, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""goldcanyon.html"">Gold Canyon Bank</a></td>
+-				<td class=""city"">Gold Canyon</td>
+-				<td class=""state"">AZ</td>
+-				<td class=""cert"">58066</td>
+-				<td class=""ai"">First Scottsdale Bank, National Association</td>
+-				<td class=""closing"">April 5, 2013</td>
+-				<td class=""updated"">April 9, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""frontier-ga.html"">Frontier Bank</a></td>
+-				<td class=""city"">LaGrange</td>
+-				<td class=""state"">GA</td>
+-				<td class=""cert"">16431</td>
+-				<td class=""ai"">HeritageBank of the South</td>
+-				<td class=""closing"">March 8, 2013</td>
+-				<td class=""updated"">March 26, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""covenant-il.html"">Covenant Bank</a></td>
+-				<td class=""city"">Chicago</td>
+-				<td class=""state"">IL</td>
+-				<td class=""cert"">22476</td>
+-				<td class=""ai"">Liberty Bank and Trust Company</td>
+-				<td class=""closing"">February 15, 2013</td>
+-				<td class=""updated"">March 4, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""1stregents.html"">1st Regents Bank</a></td>
+-				<td class=""city"">Andover</td>
+-				<td class=""state"">MN</td>
+-				<td class=""cert"">57157</td>
+-				<td class=""ai"">First Minnesota Bank</td>
+-				<td class=""closing"">January 18, 2013</td>
+-				<td class=""updated"">February 28, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""westside.html"">Westside Community Bank</a></td>
+-				<td class=""city"">University Place</td>
+-				<td class=""state"">WA</td>
+-				<td class=""cert"">33997</td>
+-				<td class=""ai"">Sunwest Bank</td>
+-				<td class=""closing"">January 11, 2013</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""cmbkozarks.html"">Community Bank of the Ozarks</a></td>
+-				<td class=""city"">Sunrise Beach</td>
+-				<td class=""state"">MO</td>
+-				<td class=""cert"">27331</td>
+-				<td class=""ai"">Bank of Sullivan</td>
+-				<td class=""closing"">December 14, 2012</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""hometown.html"">Hometown Community Bank</a></td>
+-				<td class=""city"">Braselton</td>
+-				<td class=""state"">GA</td>
+-				<td class=""cert"">57928</td>
+-				<td class=""ai"">CertusBank, National Association</td>
+-				<td class=""closing"">November 16, 2012</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""cfnb.html"">Citizens First National Bank</a></td>
+-				<td class=""city"">Princeton</td>
+-				<td class=""state"">IL</td>
+-				<td class=""cert"">3731</td>
+-				<td class=""ai"">Heartland Bank and Trust Company</td>
+-				<td class=""closing"">November 2, 2012</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""heritage_fl.html"">Heritage Bank of Florida</a></td>
+-				<td class=""city"">Lutz</td>
+-				<td class=""state"">FL</td>
+-				<td class=""cert"">35009</td>
+-				<td class=""ai"">Centennial Bank</td>
+-				<td class=""closing"">November 2, 2012</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""novabank.html"">NOVA Bank</a></td>
+-				<td class=""city"">Berwyn</td>
+-				<td class=""state"">PA</td>
+-				<td class=""cert"">27148</td>
+-				<td class=""ai"">No Acquirer</td>
+-				<td class=""closing"">October 26, 2012</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""excelbank.html"">Excel Bank</a></td>
+-				<td class=""city"">Sedalia</td>
+-				<td class=""state"">MO</td>
+-				<td class=""cert"">19189</td>
+-				<td class=""ai"">Simmons First National Bank</td>
+-				<td class=""closing"">October 19, 2012</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""firsteastside.html"">First East Side Savings Bank</a></td>
+-				<td class=""city"">Tamarac</td>
+-				<td class=""state"">FL</td>
+-				<td class=""cert"">28144</td>
+-				<td class=""ai"">Stearns Bank N.A.</td>
+-				<td class=""closing"">October 19, 2012</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""gulfsouth.html"">GulfSouth Private Bank</a></td>
+-				<td class=""city"">Destin</td>
+-				<td class=""state"">FL</td>
+-				<td class=""cert"">58073</td>
+-				<td class=""ai"">SmartBank</td>
+-				<td class=""closing"">October 19, 2012</td>
+-				<td class=""updated"">January 24, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""firstunited.html"">First United Bank</a></td>
+-				<td class=""city"">Crete</td>
+-				<td class=""state"">IL</td>
+-				<td class=""cert"">20685</td>
+-				<td class=""ai"">Old Plank Trail Community Bank, National Association</td>
+-				<td class=""closing"">September 28, 2012</td>
+-				<td class=""updated"">November 15, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""truman.html"">Truman Bank</a></td>
+-				<td class=""city"">St. Louis</td>
+-				<td class=""state"">MO</td>
+-				<td class=""cert"">27316</td>
+-				<td class=""ai"">Simmons First National Bank</td>
+-				<td class=""closing"">September 14, 2012</td>
+-				<td class=""updated"">December 17, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""firstcommbk_mn.html"">First Commercial Bank</a></td>
+-				<td class=""city"">Bloomington</td>
+-				<td class=""state"">MN</td>
+-				<td class=""cert"">35246</td>
+-				<td class=""ai"">Republic Bank &amp; Trust Company</td>
+-				<td class=""closing"">September 7, 2012</td>
+-				<td class=""updated"">December 17, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""waukegan.html"">Waukegan Savings Bank</a></td>
+-				<td class=""city"">Waukegan</td>
+-				<td class=""state"">IL</td>
+-				<td class=""cert"">28243</td>
+-				<td class=""ai"">First Midwest Bank</td>
+-				<td class=""closing"">August 3, 2012</td>
+-				<td class=""updated"">October 11, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""jasper.html"">Jasper Banking Company</a></td>
+-				<td class=""city"">Jasper</td>
+-				<td class=""state"">GA</td>
+-				<td class=""cert"">16240</td>
+-				<td class=""ai"">Stearns Bank N.A.</td>
+-				<td class=""closing"">July 27, 2012</td>
+-				<td class=""updated"">December 17, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""secondfederal.html"">Second Federal Savings and Loan Association of Chicago</a></td>
+-				<td class=""city"">Chicago</td>
+-				<td class=""state"">IL</td>
+-				<td class=""cert"">27986</td>
+-				<td class=""ai"">Hinsdale Bank &amp; Trust Company</td>
+-				<td class=""closing"">July 20, 2012</td>
+-				<td class=""updated"">January 14, 2013</td>
+-			</tr>
+ 			<tr>
+ 				<td class=""institution""><a href=""heartland.html"">Heartland Bank</a></td>
+ 				<td class=""city"">Leawood</td>
+@@ -521,4297 +248,22 @@ prepare_responsive_header_nav();
+ 				<td class=""updated"">December 17, 2012</td>
+ 			</tr>
+ 			<tr>
+-				<td class=""institution""><a href=""cherokee.html"">First Cherokee State Bank</a></td>
+-				<td class=""city"">Woodstock</td>
+-				<td class=""state"">GA</td>
+-				<td class=""cert"">32711</td>
+-				<td class=""ai"">Community &amp; Southern Bank</td>
+-				<td class=""closing"">July 20, 2012</td>
+-				<td class=""updated"">October 31, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""georgiatrust.html"">Georgia Trust Bank</a></td>
+-				<td class=""city"">Buford</td>
+-				<td class=""state"">GA</td>
+-				<td class=""cert"">57847</td>
+-				<td class=""ai"">Community &amp; Southern Bank</td>
+-				<td class=""closing"">July 20, 2012</td>
+-				<td class=""updated"">December 17, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""royalpalm.html"">The Royal Palm Bank of Florida</a></td>
+-				<td class=""city"">Naples</td>
+-				<td class=""state"">FL</td>
+-				<td class=""cert"">57096</td>
+-				<td class=""ai"">First National Bank of the Gulf Coast</td>
+-				<td class=""closing"">July 20, 2012</td>
+-				<td class=""updated"">January 7, 2013</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""glasgow.html"">Glasgow Savings Bank</a></td>
+-				<td class=""city"">Glasgow</td>
+-				<td class=""state"">MO</td>
+-				<td class=""cert"">1056</td>
+-				<td class=""ai"">Regional Missouri Bank</td>
+-				<td class=""closing"">July 13, 2012</td>
+-				<td class=""updated"">October 11, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""montgomery.html"">Montgomery Bank &amp; Trust</a></td>
+-				<td class=""city"">Ailey</td>
+-				<td class=""state"">GA</td>
+-				<td class=""cert"">19498</td>
+-				<td class=""ai"">Ameris Bank</td>
+-				<td class=""closing"">July 6, 2012</td>
+-				<td class=""updated"">October 31, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""farmersbank.html"">The Farmers Bank of Lynchburg</a></td>
+-				<td class=""city"">Lynchburg</td>
+-				<td class=""state"">TN</td>
+-				<td class=""cert"">1690</td>
+-				<td class=""ai"">Clayton Bank and Trust</td>
+-				<td class=""closing"">June 15, 2012</td>
+-				<td class=""updated"">October 31, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""securityexchange.html"">Security Exchange Bank</a></td>
+-				<td class=""city"">Marietta</td>
+-				<td class=""state"">GA</td>
+-				<td class=""cert"">35299</td>
+-				<td class=""ai"">Fidelity Bank</td>
+-				<td class=""closing"">June 15, 2012</td>
+-				<td class=""updated"">October 10, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""putnam.html"">Putnam State Bank</a></td>
+-				<td class=""city"">Palatka</td>
+-				<td class=""state"">FL</td>
+-				<td class=""cert"">27405</td>
+-				<td class=""ai"">Harbor Community Bank</td>
+-				<td class=""closing"">June 15, 2012</td>
+-				<td class=""updated"">October 10, 2012</td>
+-			</tr>
+-			<tr>
+-				<td class=""institution""><a href=""waccamaw.html"">Waccamaw Bank</a></td>

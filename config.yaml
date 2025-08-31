@@ -1,0 +1,20 @@
+# ==============================================================================
+# CS202 - Lab Assignment 4: Configuration
+# ==============================================================================
+
+# Justification: Selected three large, popular, and diverse Python projects
+# based on a funnel approach (Stars > 20k, Commits > 5k, recent activity).
+repositories:
+  - "https://github.com/pandas-dev/pandas"
+  - "https://github.com/tiangolo/fastapi"
+  - "https://github.com/scikit-learn/scikit-learn"
+
+# Directory for cloning repositories. This will be cached by Pydriller.
+clone_dir: "cloned_repos"
+
+# Directory for storing all outputs (datasets and plots).
+results_dir: "results"
+
+# Number of parallel processes to use for mining.
+# Set to 0 to automatically use all available CPU cores.
+parallel_processes: 0
